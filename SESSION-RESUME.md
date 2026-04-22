@@ -1,101 +1,83 @@
 # Session Resume — Order Processing System
 
+## Project Location
+`/Users/guochao/IdeaProjects/order_rabbitmq/order-processing-system/`
+
+## Maven
+Maven installed at `~/.zshrc` (export PATH=$HOME/apache-maven/bin:$PATH). Available as `mvn` in new terminal.
+
 ## What Was Done
 
-### 1. Maven Installation
-- Downloaded `apache-maven-3.9.6-bin.tar.gz` from `https://archive.apache.org/dist/maven/maven-3/3.9.6/binaries/`
-- Extracted to `/Users/guochao/apache-maven/`
-- Added to `~/.zshrc`:
+### Compilation & Tests — PASSED
+- `mvn clean compile` — BUILD SUCCESS
+- `mvn test` — 9 tests passed
+- `mvn package -DskipTests` — JAR built at `target/order-processing-system-1.0.0-SNAPSHOT.jar` (113MB)
+
+### MySQL Schema — INITIALIZED
+- Database: `order` (not `order_db`)
+- Tables created: `orders`, `order_outbox`, `order_event_log`
+- MySQL root password: `root`
+- Apply schema command (requires `-i` for stdin):
   ```bash
-  export MAVEN_HOME=/Users/guochao/apache-maven
-  export PATH=$MAVEN_HOME/bin:$PATH
+  cat scripts/init.sql | kubectl exec -i mysql-0 -n database -- mysql -uroot -proot
   ```
-- **For new Claude Code sessions**: `mvn` will work after restarting the session (shell picks up `~/.zshrc`)
 
-### 2. Project Location
-- `/Users/guochao/IdeaProjects/order_rabbitmq/order-processing-system/`
+### Configuration Fixed
+- `application.yml` — DB name `order`, all RocketMQ configs use `${ENV_VAR}` placeholders
+- `application-default.yml` — DB name `order`
+- `helm/order-processing/values.yaml` — db.name: `order`
+- `.env` — all config values (not committed, contains secrets)
 
-### 3. Compilation Error (FIXED — needs verification)
-File `src/main/java/com/example/order/config/RocketMQConfig.java` had an incorrect import:
-- **Removed**: `import org.apache.rocketmq.spring.config.TransactionMQProducerFactory;`
-- This was the only compilation error. After restarting the session, compile with:
+## What's Remaining
 
-### 4. Pending: Compile and Test
-
-```bash
-# In new session, run:
-cd /Users/guochao/IdeaProjects/order_rabbitmq/order-processing-system
-mvn clean compile
-```
-
-If compilation passes, run tests:
+### 1. Docker Image Build (blocked by network)
+Docker cannot pull `eclipse-temurin:17-jre-alpine` from Docker Hub — network timeout. Options:
+- Fix Docker network/proxy to reach Docker Hub
+- Use a local registry mirror
+- Build in environment with internet access, push to registry, then deploy
 
 ```bash
-mvn test
+docker build -t order-processing:1.0.0 .
+docker tag order-processing:1.0.0 <your-registry>/order-processing:1.0.0
+docker push <your-registry>/order-processing:1.0.0
 ```
 
-### 5. Build JAR
+Update `helm/order-processing/values.yaml` `image.repository` to match your registry.
+
+### 2. Helm Deploy (after image is available)
 
 ```bash
-mvn clean package -DskipTests
+helm install order-processing ./helm/order-processing \
+  --namespace order-system \
+  --create-namespace \
+  --set secret.db.password=root
 ```
 
-### 6. Project Structure (already created)
-```
-order-processing-system/
-├── pom.xml
-├── Dockerfile
-├── .dockerignore
-├── scripts/init.sql
-├── src/main/java/com/example/order/
-│   ├── OrderApplication.java
-│   ├── controller/OrderController.java
-│   ├── service/
-│   │   ├── OrderService.java
-│   │   ├── OrderOutboxPublisher.java
-│   │   └── OutboxRetryScheduler.java
-│   ├── consumer/OrderEventConsumer.java
-│   ├── entity/{Order,OrderOutbox,OrderEventLog}.java
-│   ├── repository/{Order,OrderOutbox,OrderEventLog}Repository.java
-│   ├── dto/{CreateOrderRequest,UpdateStatusRequest,OrderDTO,ApiResponse}.java
-│   ├── enums/OrderStatus.java
-│   ├── config/RocketMQConfig.java
-│   └── exception/{ServiceException,GlobalExceptionHandler}.java
-├── src/main/resources/application.yml
-├── src/test/
-│   ├── java/.../OrderServiceTest.java
-│   ├── java/.../OrderEventConsumerTest.java
-│   └── resources/application-test.yml
-└── helm/order-processing/
-    ├── Chart.yaml, values.yaml, .helmignore
-    └── templates/{deployment,service,configmap,secret}.yaml
+### 3. Functional Tests (after deploy)
+```bash
+kubectl port-forward svc/order-processing 8080 -n order-system &
+curl -X POST http://localhost:8080/api/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{"orderNo": "ORD-TEST-001", "amount": 99.99}'
 ```
 
-### 7. Docs Already Written
-- `docs/superpowers/specs/2026-04-13-order-processing-system-design.md` — design spec
-- `docs/superpowers/plans/2026-04-13-order-processing-system-implementation.md` — implementation plan
-- `docs/DEPLOYMENT-TEST-PLAN.md` — deployment and test guide
+## Correct Config Values
+```
+DB_HOST=mysql.database.svc.cluster.local
+DB_PORT=3306
+DB_NAME=order
+DB_USERNAME=root
+DB_PASSWORD=root
+ROCKETMQ_NAMESERVER=rocketmq.middleware.svc.cluster.local:9876
+ROCKETMQ_PRODUCER_GROUP=order-producer-group
+ROCKETMQ_CONSUMER_GROUP=order-consumer-group
+ROCKETMQ_TOPIC_ORDER_EVENTS=order-topic
+```
 
-## MySQL Connection (already configured)
-- Host: `mysql.database.svc.cluster.local`
-- Database: `order_db`
-- User: `root`
-- Password: `root`
-- Run schema: `kubectl exec -it <mysql-pod> -n database -- mysql -u root -p < scripts/init.sql`
-
-## RocketMQ (already configured)
-- NameServer: `rocketmq.middleware.svc.cluster.local:9876`
-- Producer Group: `order-producer-group`
-- Consumer Group: `order-consumer-group`
-- Topic: `order-topic`
-
-## Git Commits (15 commits on main)
-Run `git log --oneline` in `order-processing-system/` to see all commits.
-
-## Next Steps for New Session
-1. `cd /Users/guochao/IdeaProjects/order_rabbitmq/order-processing-system`
-2. `mvn clean compile` — verify compilation passes
-3. `mvn test` — run unit tests
-4. Initialize MySQL schema on Kubernetes
-5. Deploy via Helm
-6. Run functional tests per `docs/DEPLOYMENT-TEST-PLAN.md`
+## Git Log (recent commits)
+```
+25b3e06 feat: update configuration for actual MySQL/RocketMQ deployment
+01b0ffa fix: resolve compilation errors
+e75d093 feat: add Dockerfile for container image build
+7b5ef03 docs: add deployment and test plan
+```
