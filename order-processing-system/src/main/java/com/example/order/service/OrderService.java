@@ -97,16 +97,17 @@ public class OrderService {
         order.setStatus(newStatus);
         order = orderRepository.save(order);
 
-        String payload = buildEventPayload(order.getOrderNo(), OrderOutbox.EVENT_ORDER_STATUS_CHANGED,
+        String payload = buildEventPayload(order.getOrderNo(), OrderOutbox.getStatusEventType(newStatus),
                 Map.of("orderNo", order.getOrderNo(),
                         "oldStatus", oldStatus.name(),
                         "newStatus", newStatus.name(),
+                        "transition", oldStatus.name() + "_TO_" + newStatus.name(),
                         "updatedAt", LocalDateTime.now().toString()));
 
         OrderOutbox outbox = OrderOutbox.builder()
                 .aggregateType("Order")
                 .aggregateId(order.getOrderNo())
-                .eventType(OrderOutbox.EVENT_ORDER_STATUS_CHANGED)
+                .eventType(OrderOutbox.getStatusEventType(newStatus))
                 .payload(payload)
                 .status(OrderOutbox.STATUS_PENDING)
                 .build();
@@ -117,7 +118,7 @@ public class OrderService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                sendTransactionMessage(finalOutbox, orderNoForEvent, "ORDER_STATUS_CHANGED");
+                sendTransactionMessage(finalOutbox, orderNoForEvent, OrderOutbox.getStatusEventType(newStatus));
             }
         });
 

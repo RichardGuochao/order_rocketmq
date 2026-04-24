@@ -60,18 +60,42 @@ public class OrderEventConsumer implements RocketMQListener<String> {
     private void processEvent(String eventType, String orderNo, JsonNode root) {
         switch (eventType) {
             case "ORDER_CREATED" -> handleOrderCreated(orderNo, root);
-            case "ORDER_STATUS_CHANGED" -> handleOrderStatusChanged(orderNo, root);
+            case "ORDER_PAID" -> handleOrderPaid(orderNo, root);
+            case "ORDER_PROCESSING" -> handleOrderProcessing(orderNo, root);
+            case "ORDER_SHIPPED" -> handleOrderShipped(orderNo, root);
+            case "ORDER_COMPLETED" -> handleOrderCompleted(orderNo, root);
+            case "ORDER_CANCELLED" -> handleOrderCancelled(orderNo, root);
             default -> log.warn("Unknown event type: {}", eventType);
         }
     }
 
     private void handleOrderCreated(String orderNo, JsonNode root) {
-        log.info("Handling ORDER_CREATED for order: {}", orderNo);
+        JsonNode data = root.get("data");
+        log.info("Order created: orderNo={}, amount={}", orderNo, data.get("amount").asText());
     }
 
-    private void handleOrderStatusChanged(String orderNo, JsonNode root) {
+    private void handleOrderPaid(String orderNo, JsonNode root) {
         JsonNode data = root.get("data");
-        String newStatus = data.get("newStatus").asText();
-        log.info("Handling ORDER_STATUS_CHANGED for order {}: newStatus={}", orderNo, newStatus);
+        log.info("Order paid: orderNo={}, transition={}", orderNo, data.get("transition").asText());
+    }
+
+    private void handleOrderProcessing(String orderNo, JsonNode root) {
+        JsonNode data = root.get("data");
+        log.info("Order processing: orderNo={}, transition={}", orderNo, data.get("transition").asText());
+    }
+
+    private void handleOrderShipped(String orderNo, JsonNode root) {
+        JsonNode data = root.get("data");
+        log.info("Order shipped: orderNo={}, transition={}", orderNo, data.get("transition").asText());
+    }
+
+    private void handleOrderCompleted(String orderNo, JsonNode root) {
+        JsonNode data = root.get("data");
+        log.info("Order completed: orderNo={}, transition={}", orderNo, data.get("transition").asText());
+    }
+
+    private void handleOrderCancelled(String orderNo, JsonNode root) {
+        JsonNode data = root.get("data");
+        log.info("Order cancelled: orderNo={}, transition={}", orderNo, data.get("transition").asText());
     }
 }
