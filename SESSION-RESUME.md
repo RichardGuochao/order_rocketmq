@@ -8,77 +8,116 @@ Maven installed at `~/.apache-maven/`, added to `~/.zshrc`. Available as `mvn` i
 
 ---
 
-## Completed Steps
+## Current Deployment Status
 
-### ✅ Compilation & Tests
-- `mvn clean compile` — BUILD SUCCESS
-- `mvn test` — 9 tests passed (6 OrderService + 3 OrderEventConsumer)
-- `mvn package -DskipTests` — JAR built at `target/order-processing-system-1.0.0-SNAPSHOT.jar` (113MB)
+### ✅ Application Deployed and Running
+- **Image:** `guochaorichard/order-processing:1.0.0.20260424-v2` pushed to Docker Hub
+- **Helm Release:** `order-processing` revision 2 deployed in namespace `default`
+- **Pods:** 2/2 Running (Ready)
+- **API:** Working at `http://localhost:8080/api/v1/orders` (via port-forward)
 
-### ✅ MySQL Schema Initialized
-- Database: `order` (from MySQL secret `mysql.database`)
-- Tables: `orders`, `order_outbox`, `order_event_log`
-- MySQL root password: `root`
-- Apply schema command:
-  ```bash
-  cat scripts/init.sql | kubectl exec -i mysql-0 -n database -- mysql -uroot -proot
-  ```
+### ✅ Verified Functionality
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/api/v1/orders` | POST | Working - creates order |
+| `/api/v1/orders/{orderNo}` | GET | Working - retrieves order |
+| `/api/v1/orders/{orderNo}/status` | PUT | Working - updates status |
+| `/actuator/health` | GET | Working - shows UP |
 
-### ✅ Configuration Fixed
-- `application.yml` — DB name `order`, RocketMQ configs use `${ENV_VAR}` placeholders
-- `application-default.yml` — DB name `order`
-- `helm/order-processing/values.yaml` — db.name: `order`
-- `.env` — all config values template
+### ✅ RocketMQ Consumer Working
+- Consumer connected to nameserver `rocketmq-namesrv.middleware.svc.cluster.local:9876`
+- Messages consumed successfully
+- Duplicate detection working (idempotent consumer via `order_event_log` table)
 
----
-
-## Blocked: Docker Image Build
-
-### Error
-```
-failed to authorize: DeadlineExceeded: failed to fetch oauth token:
-Post "https://auth.docker.io/token": dial tcp 108.160.165.53:443: i/o timeout
-```
-
-### Root Cause Analysis
-
-**VPN + Proxy misconfiguration:**
-1. Docker Desktop is configured with HTTP proxy: `http.docker.internal:3128`
-2. This proxy is inside Docker Desktop's Linux VM network
-3. Host shell uses DNS `223.5.5.5` (Alibaba DNS) which cannot route to Docker Hub IPs
-4. `http.docker.internal` only resolves from inside Docker Desktop VM, not from host macOS
-5. VPN is active on macOS but does not route shell traffic
-
-**Network path confirmed broken:**
-- `nslookup auth.docker.io` → resolves to `108.160.165.53` ✅
-- `ping 108.160.165.53` → 100% packet loss ❌
-- TCP port 443 to Docker Hub IPs → unreachable ❌
-- `curl https://registry-1.docker.io/v2/` → timeout ❌
-
-### Git Commits
-```
-a8fee32 docs: update session resume with actual deployment values and status
-25b3e06 feat: update configuration for actual MySQL/RocketMQ deployment
-01b0ffa fix: resolve compilation errors (setSendMsgTimeout, final vars)
-e75d093 feat: add Dockerfile for container image build
-7b5ef03 docs: add deployment and test plan
-ec4763a test: add OrderServiceTest and OrderEventConsumerTest
-aa6909a feat: add Helm chart for Kubernetes deployment
-... (total ~17 commits)
-```
+### ✅ Outbox Pattern Working
+- Outbox retry scheduler successfully republished 6 pending outbox events
+- All 6 outbox entries (1-6) marked as republished successfully
+- Orders and outbox events stored in MySQL `order` database
 
 ---
 
-## What's Needed to Complete Deployment
+## Fixed Issues
 
-1. **Docker image** — needs registry/mirror accessible from Docker Desktop proxy, OR different approach
-2. **Helm install** — `helm install order-processing ./helm/order-processing --namespace order-system`
-3. **Functional tests** — per `docs/DEPLOYMENT-TEST-PLAN.md`
+### Issue 1: RocketMQ NameServer Address (RESOLVED)
+**Problem:** Nameserver address was incorrect in configuration
 
-## Alternative Approaches to Explore
+**Fix:** Changed `rocketmq.middleware.svc.cluster.local` to `rocketmq-namesrv.middleware.svc.cluster.local`
+- Updated `helm/order-processing/values.yaml`
+- Updated `src/main/resources/application.yml`
+- Updated `src/main/resources/application-default.yml`
 
-- Configure Docker Desktop proxy in System Settings to route through VPN-compatible proxy
-- Use a VPN-compatible proxy server that Docker Desktop can also use
-- Use a local registry mirror (e.g., `registry.cn-hangzhou.aliyuncs.com` mirrors Docker Hub)
-- Build image in a VM/cloud environment with internet, push to registry, then deploy
-- Use `kind` build with `make` instead of Docker Hub image
+### Issue 2: Outbox Transaction Update Failed (RESOLVED)
+**Problem:** `OutboxRetryScheduler` and `OrderOutboxPublisher.executeLocalTransaction` were calling `@Modifying` queries (`updateStatus()`) which require Spring's transaction context. These methods run outside Spring's proxy:
+- `OutboxRetryScheduler` - scheduled task runs on scheduler thread
+- `OrderOutboxPublisher.executeLocalTransaction` - called by RocketMQ thread
+
+**Error:**
+```
+Executing an update/delete query
+```
+
+**Fix:** Changed from `@Modifying` JPQL update query to using `findById()` + `save()`:
+```java
+// Before (fails - no transaction context)
+orderOutboxRepository.updateStatus(outbox.getId(), OrderOutbox.STATUS_PUBLISHED, LocalDateTime.now());
+
+// After (works - save() handles entity merge)
+OrderOutbox toUpdate = orderOutboxRepository.findById(outbox.getId()).orElse(null);
+if (toUpdate != null) {
+    toUpdate.setStatus(OrderOutbox.STATUS_PUBLISHED);
+    toUpdate.setPublishedAt(LocalDateTime.now());
+    orderOutboxRepository.save(toUpdate);
+}
+```
+
+**Files Modified:**
+- `src/main/java/com/example/order/service/OrderOutboxPublisher.java`
+- `src/main/java/com/example/order/service/OutboxRetryScheduler.java`
+
+### Issue 3: Docker Proxy (RESOLVED)
+Proxy was disabled in Docker Desktop - pushes now working.
+
+---
+
+## Git Status
+All code changes committed to `order-processing-system/` subdirectory.
+
+---
+
+## Configuration Files Updated
+- `Dockerfile` - Multi-stage build with correct JAR path (`/app/app.jar`)
+- `Order.java` - Added `columnDefinition = "VARCHAR(32)"` to fix Hibernate validation
+- `application.yml` - `auto-start-consumer: false` removed, consumer enabled
+- `OrderEventConsumer.java` - Consumer enabled (no `@Profile` exclusion)
+- `RocketMQConfig.java` - Uses `setSendMsgTimeout` (not `setSendTimeout`)
+- `OrderService.java` - Fixed inner class variable capture issue
+- `helm/order-processing/values.yaml` - Image `guochaorichard/order-processing:1.0.0.20260424-v2`
+- `OrderOutboxPublisher.java` - Uses `save()` instead of `@Modifying` query
+- `OutboxRetryScheduler.java` - Uses `save()` instead of `@Modifying` query
+
+---
+
+## Quick Commands Reference
+
+```bash
+# Check pods
+kubectl get pods -l app=order-processing
+
+# View logs
+kubectl logs -l app=order-processing --tail=50
+
+# Port-forward for API access
+kubectl port-forward svc/order-processing 8080:8080
+
+# Test API
+curl -s -X POST http://localhost:8080/api/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{"orderNo":"TEST-001","amount":50.00}'
+
+# Check outbox events (via MySQL client pod)
+kubectl run mysql-client --image=mysql:8 --rm -it --restart=Never -- \
+  mysql -h mysql.database.svc.cluster.local -uroot -proot -e "USE \`order\`; SELECT id, status, event_type, created_at FROM order_outbox ORDER BY id DESC LIMIT 5;"
+
+# Check RocketMQ nameserver logs
+kubectl logs -l app=rocketmq-namesrv -n middleware --tail=20
+```
