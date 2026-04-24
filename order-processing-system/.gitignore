@@ -1,0 +1,14 @@
+# Build output
+target/
+
+# Environment secrets
+.env
+.env.local
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Logs
+*.log

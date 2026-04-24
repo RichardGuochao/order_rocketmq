@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:mysql://mysql.database.svc.cluster.local:3306/order?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+rocketmq:
+  name-server: rocketmq-namesrv.middleware.svc.cluster.local:9876
+  producer:
+    group: order-producer-group
+    send-timeout: 3000
+    retry-times-when-send-failed: 2
+  consumer:
+    group: order-consumer-group
+    auto-start-consumer: false
+  topics:
+    order-events: order-topic

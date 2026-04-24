@@ -1,0 +1,6 @@
+apiVersion: v2
+name: order-processing
+description: Order Processing System with Transactional Outbox and RocketMQ
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Build output (built inside Docker)
+target/
+
+# Logs
+*.log
+
+# Docs
+*.md
+docs/
+
+# Env files
+.env
+.env.local

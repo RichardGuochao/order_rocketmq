@@ -1,0 +1,8 @@
+*.tar.gz
+*.tmp
+.DS_Store
+.git/
+.gitignore
+*.md
+charts/
+Makefile
